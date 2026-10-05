@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مشغل الفيديو متعدد الجودات - OmniStream</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        cairo: ['Cairo', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                            900: '#312e81',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Cairo', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6366f1;
+        }
+
+        /* Video Scrubber & Slider Range Customization */
+        input[type=range] {
+            -webkit-appearance: none;
+            background: transparent;
+        }
+        input[type=range]:focus {
+            outline: none;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 6px;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 3px;
+            transition: all 0.2s ease;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            height: 14px;
+            width: 14px;
+            border-radius: 50%;
+            background: #6366f1;
+            cursor: pointer;
+            -webkit-appearance: none;
+            margin-top: -4px;
+            box-shadow: 0 0 10px rgba(99, 102, 241, 0.5);
+            transition: transform 0.1s ease;
+        }
+        input[type=range]::-webkit-slider-thumb:hover {
+            transform: scale(1.3);
+        }
+
+        /* Video Container Overlay Animations */
+        .controls-overlay {
+            background: linear-gradient(to top, rgba(15, 23, 42, 0.95) 0%, rgba(15, 23, 42, 0.4) 60%, rgba(0,0,0,0) 100%);
+            transition: opacity 0.3s ease;
+        }
+
+        .player-container:hover .controls-overlay,
+        .player-container.paused .controls-overlay {
+            opacity: 1 !important;
+            pointer-events: auto !important;
+        }
+
+        /* Pulse Animation for Live Status */
+        @keyframes pulse-fast {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .pulse-live {
+            animation: pulse-fast 1.5s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between selection:bg-brand-500 selection:text-white">
+
+    <!-- Header -->
+    <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-400 flex items-center justify-center shadow-lg shadow-brand-500/30">
+                    <i class="fa-solid font-bold fa-play text-white text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg tracking-wide text-white leading-tight">OmniStream</h1>
+                    <p class="text-xs text-slate-400">منصة التشغيل والتحويل التفاعلي للدقة</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-live"></span>
+                    محرك معالجة الفيديو: نشط
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full flex-grow grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+        <!-- Video Player Section (2 Columns on Large Screens) -->
+        <div class="lg:col-span-2 flex flex-col gap-4">
+            
+            <!-- Video Container -->
+            <div id="playerContainer" class="player-container relative aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl border border-slate-800 group select-none">
+                
+                <!-- Native HTML5 Video Element (Source) -->
+                <video id="mainVideo" class="hidden" crossorigin="anonymous" playsinline preload="metadata">
+                    <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" type="video/mp4">
+                    متصفحك لا يدعم تشغيل الفيديو.
+                </video>
+
+                <!-- Processing Canvas Output -->
+                <canvas id="videoCanvas" class="w-full h-full object-contain cursor-pointer"></canvas>
+
+                <!-- Buffering / Loading Spinner -->
+                <div id="loadingSpinner" class="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm hidden pointer-events-none">
+                    <div class="flex flex-col items-center gap-3">
+                        <i class="fa-solid fa-circle-notch fa-spin text-4xl text-brand-500"></i>
+                        <span class="text-sm font-medium text-slate-300">جاري تحميل المعالجة...</span>
+                    </div>
+                </div>
+
+                <!-- Custom Controls Overlay -->
+                <div id="controlsOverlay" class="controls-overlay absolute inset-0 opacity-0 flex flex-col justify-between p-4 pointer-events-none transition-opacity duration-300">
+                    
+                    <!-- Top Bar in Controls (Title and Live Badge) -->
+                    <div class="flex items-center justify-between text-xs text-slate-300 font-medium pointer-events-auto">
+                        <div class="flex items-center gap-2 bg-slate-900/80 backdrop-blur px-3 py-1.5 rounded-lg border border-slate-700/50">
+                            <i class="fa-solid fa-film text-brand-500"></i>
+                            <span id="videoTitle">Big Buck Bunny (فيديو تجريبي)</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span id="canvasResBadge" class="bg-brand-600/90 text-white font-bold px-2.5 py-1 rounded-md text-xs shadow-sm">1080p (الأصلية)</span>
+                            <span id="processingModeBadge" class="bg-slate-800/80 text-slate-300 px-2.5 py-1 rounded-md text-xs border border-slate-700">Canvas Native</span>
+                        </div>
+                    </div>
+
+                    <!-- Center Big Play/Pause Touch Target -->
+                    <div class="self-center my-auto pointer-events-auto cursor-pointer" id="centerPlayBtn">
+                        <div class="w-16 h-16 rounded-full bg-brand-600/90 hover:bg-brand-500 hover:scale-110 transition text-white flex items-center justify-center shadow-xl backdrop-blur">
+                            <i id="centerPlayIcon" class="fa-solid fa-play text-2xl ml-1"></i>
+                        </div>
+                    </div>
+
+                    <!-- Bottom Controls Bar -->
+                    <div class="flex flex-col gap-2 pointer-events-auto bg-slate-900/90 backdrop-blur p-3 rounded-xl border border-slate-700/60 shadow-lg">
+                        
+                        <!-- Timeline / Progress Bar -->
+                        <div class="flex items-center gap-3">
+                            <span id="currentTime" class="text-xs font-mono text-slate-300 w-12 text-left">00:00</span>
+                            <div class="relative flex-grow flex items-center">
+                                <input type="range" id="progressBar" min="0" max="100" value="0" step="0.1" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer">
+                            </div>
+                            <span id="durationTime" class="text-xs font-mono text-slate-400 w-12 text-right">00:00</span>
+                        </div>
+
+                        <!-- Buttons Toolbar -->
+                        <div class="flex items-center justify-between pt-1">
+                            
+                            <!-- Left Side Buttons (Play, Volume, Quality) -->
+                            <div class="flex items-center gap-3 sm:gap-4">
+                                <button id="playPauseBtn" class="text-slate-200 hover:text-brand-400 transition text-lg w-8 h-8 flex items-center justify-center">
+                                    <i id="playIcon" class="fa-solid fa-play"></i>
+                                </button>
+
+                                <!-- Volume Control -->
+                                <div class="flex items-center gap-2 group/vol">
+                                    <button id="muteBtn" class="text-slate-300 hover:text-white transition text-base">
+                                        <i id="volumeIcon" class="fa-solid fa-volume-high"></i>
+                                    </button>
+                                    <input type="range" id="volumeBar" min="0" max="1" step="0.05" value="1" class="w-16 sm:w-20 accent-brand-500 h-1">
+                                </div>
+
+                                <div class="h-4 w-px bg-slate-700"></div>
+
+                                <!-- Resolution / Quality Selector -->
+                                <div class="relative inline-block text-left">
+                                    <button id="qualityMenuBtn" class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition">
+                                        <i class="fa-solid fa-sliders text-brand-400"></i>
+                                        <span id="selectedQualityLabel">1080p (FHD)</span>
+                                        <i class="fa-solid fa-chevron-down text-[10px] text-slate-400"></i>
+                                    </button>
+
+                                    <!-- Quality Dropdown Menu -->
+                                    <div id="qualityDropdown" class="hidden absolute bottom-full mb-2 right-0 w-44 rounded-xl bg-slate-800 border border-slate-700 shadow-2xl py-1 z-30 text-xs">
+                                        <div class="px-3 py-1.5 border-b border-slate-700/80 text-[11px] font-bold text-slate-400">اختر دقة العرض:</div>
+                                        <button data-res="1080" class="quality-opt w-full text-right px-3 py-2 text-slate-200 hover:bg-brand-600 hover:text-white flex items-center justify-between transition font-medium">
+                                            <span>1080p (1920x1080)</span>
+                                            <span class="text-[10px] opacity-75">أصلي</span>
+                                        </button>
+                                        <button data-res="720" class="quality-opt w-full text-right px-3 py-2 text-slate-200 hover:bg-brand-600 hover:text-white flex items-center justify-between transition font-medium">
+                                            <span>720p (1280x720)</span>
+                                            <span class="text-[10px] opacity-75">HD</span>
+                                        </button>
+                                        <button data-res="480" class="quality-opt w-full text-right px-3 py-2 text-slate-200 hover:bg-brand-600 hover:text-white flex items-center justify-between transition font-medium">
+                                            <span>480p (854x480)</span>
+                                            <span class="text-[10px] opacity-75">SD</span>
+                                        </button>
+                                        <button data-res="360" class="quality-opt w-full text-right px-3 py-2 text-slate-200 hover:bg-brand-600 hover:text-white flex items-center justify-between transition font-medium">
+                                            <span>360p (640x360)</span>
+                                            <span class="text-[10px] opacity-75">منخفضة</span>
+                                        </button>
+                                        <button data-res="240" class="quality-opt w-full text-right px-3 py-2 text-slate-200 hover:bg-brand-600 hover:text-white flex items-center justify-between transition font-medium">
+                                            <span>240p (426x240)</span>
+                                            <span class="text-[10px] opacity-75">ضعيفة</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Right Side Buttons (Speed, Theater, Fullscreen) -->
+                            <div class="flex items-center gap-3">
+                                <!-- Speed Menu Button -->
+                                <div class="relative inline-block text-left">
+                                    <button id="speedMenuBtn" class="text-slate-300 hover:text-white font-mono text-xs font-semibold px-2 py-1 rounded bg-slate-800 border border-slate-700">
+                                        <span id="speedLabel">1.0x</span>
+                                    </button>
+                                    <div id="speedDropdown" class="hidden absolute bottom-full mb-2 left-0 w-24 rounded-xl bg-slate-800 border border-slate-700 shadow-xl py-1 z-30 text-xs">
+                                        <button data-speed="0.5" class="speed-opt w-full text-center py-1.5 text-slate-200 hover:bg-brand-600">0.5x</button>
+                                        <button data-speed="0.75" class="speed-opt w-full text-center py-1.5 text-slate-200 hover:bg-brand-600">0.75x</button>
+                                        <button data-speed="1.0" class="speed-opt w-full text-center py-1.5 text-slate-200 hover:bg-brand-600 font-bold bg-slate-700/50">1.0x</button>
+                                        <button data-speed="1.25" class="speed-opt w-full text-center py-1.5 text-slate-200 hover:bg-brand-600">1.25x</button>
+                                        <button data-speed="1.5" class="speed-opt w-full text-center py-1.5 text-slate-200 hover:bg-brand-600">1.5x</button>
+                                        <button data-speed="2.0" class="speed-opt w-full text-center py-1.5 text-slate-200 hover:bg-brand-600">2.0x</button>
+                                    </div>
+                                </div>
+
+                                <button id="fullscreenBtn" class="text-slate-300 hover:text-white transition text-base">
+                                    <i class="fa-solid fa-expand"></i>
+                                </button>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Realtime Metrics Dashboard -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div class="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
+                    <div class="text-slate-400 text-xs mb-1">الأبعاد الفعلية للـ Canvas</div>
+                    <div id="metricRes" class="text-sm font-bold text-slate-100 font-mono">1920 x 1080</div>
+                </div>
+                <div class="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
+                    <div class="text-slate-400 text-xs mb-1">معدل الإطارات (FPS)</div>
+                    <div id="metricFps" class="text-sm font-bold text-emerald-400 font-mono">60 FPS</div>
+                </div>
+                <div class="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
+                    <div class="text-slate-400 text-xs mb-1">عدم الوضوح / البكسلة</div>
+                    <div id="metricBitrate" class="text-sm font-bold text-indigo-400 font-mono">100% (أصلي)</div>
+                </div>
+                <div class="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
+                    <div class="text-slate-400 text-xs mb-1">حالة المعالجة</div>
+                    <div id="metricStatus" class="text-sm font-bold text-amber-400">بث حي لمصدر 1080p</div>
+                </div>
+            </div>
+
+            <!-- Controls for Pixelation & Transcoding Canvas Simulation Engine -->
+            <div class="bg-slate-800/40 border border-slate-700/60 rounded-2xl p-5 space-y-4">
+                <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
+                    <h3 class="font-bold text-sm text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-microchip text-brand-400"></i>
+                        محرك تقليل الدقة الديناميكي (Dynamic Resolution Downscaler Engine)
+                    </h3>
+                    <span class="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded">محاكاة الشريحة</span>
+                </div>
+
+                <p class="text-xs text-slate-400 leading-relaxed">
+                    يعمل هذا المحرك على اعتراض إطارات الفيديو المصدرية (1080p) وإعادة رسمها فوراً على شبكة أبعاد أصغر حقيقية (Downscaling Grid) لإعطائك التجربة الحقيقية لمشاهدة أي فيديو بجودات منخفضة (240p - 720p) حتى لو لم توجد نسَخ مجهزة مسبقاً!
+                </p>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1.5">مستوى تنعيم البكسلات (Smoothing)</label>
+                        <select id="imageSmoothingSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
+                            <option value="false">معطل (إظهار بكسلات الدقة المنخفضة بوضوح - Pixelated Mode)</option>
+                            <option value="true" selected>مفعّل (تنعيم الحواف - Smooth Mode)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1.5">تأثير تشويش الضغط (Compression Artifacts Effect)</label>
+                        <div class="flex items-center gap-3">
+                            <input type="range" id="compressionBlurRange" min="0" max="4" step="0.5" value="0" class="w-full h-1.5 bg-slate-700 rounded-lg">
+                            <span id="blurVal" class="text-xs font-mono text-slate-400 w-8">0px</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Right Sidebar (Inputs & Preset Videos) -->
+        <div class="flex flex-col gap-6">
+
+            <!-- Video Source Input Box with Prominent Direct URL Section -->
+            <div class="bg-slate-800/70 border border-brand-500/30 shadow-xl rounded-2xl p-5 space-y-4">
+                <div class="flex items-center justify-between border-b border-slate-700/80 pb-3">
+                    <h3 class="font-bold text-sm text-slate-100 flex items-center gap-2">
+                        <i class="fa-solid fa-link text-brand-400"></i>
+                        تشغيل فيديو من رابط URL مباشر
+                    </h3>
+                    <span class="text-[10px] bg-brand-500/20 text-brand-300 px-2 py-0.5 rounded border border-brand-500/30">مميّز</span>
+                </div>
+
+                <!-- Direct URL Input Form -->
+                <div class="space-y-3">
+                    <label class="text-xs text-slate-300 block font-medium">أدخل رابط فيديو مباشر (MP4, WebM, OGG):</label>
+                    <div class="flex flex-col gap-2">
+                        <div class="relative flex items-center">
+                            <input type="url" id="videoUrlInput" placeholder="https://example.com/video.mp4" class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-9 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition dir-ltr">
+                            <i class="fa-solid fa-globe absolute right-3 text-slate-500 text-xs"></i>
+                        </div>
+                        <div class="flex gap-2">
+                            <button id="loadUrlBtn" class="w-full bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-lg shadow-brand-500/20 transition active:scale-[0.98] flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-play text-xs"></i>
+                                تشغيل الرابط المباشر
+                            </button>
+                            <button id="clearUrlBtn" class="bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-semibold px-3 rounded-xl transition" title="مسح">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Samples Direct URLs -->
+                <div class="pt-1">
+                    <span class="text-[11px] text-slate-400 block mb-2 font-medium">روابط سريعة للتجربة:</span>
+                    <div class="flex flex-wrap gap-1.5">
+                        <button data-sample="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" data-name="فيديو تجريبي 1 (720p)" class="sample-url-btn text-[11px] bg-slate-900 hover:bg-brand-600/30 text-slate-300 hover:text-brand-300 px-2.5 py-1 rounded-lg border border-slate-700/80 transition">
+                            <i class="fa-solid fa-link text-[10px] ml-1"></i>عينات غوغل
+                        </button>
+                        <button data-sample="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4" data-name="Sintel Trailer (1080p)" class="sample-url-btn text-[11px] bg-slate-900 hover:bg-brand-600/30 text-slate-300 hover:text-brand-300 px-2.5 py-1 rounded-lg border border-slate-700/80 transition">
+                            <i class="fa-solid fa-link text-[10px] ml-1"></i>Sintel 1080p
+                        </button>
+                    </div>
+                </div>
+
+                <div class="relative flex py-1 items-center">
+                    <div class="flex-grow border-t border-slate-700/80"></div>
+                    <span class="flex-shrink mx-3 text-[11px] text-slate-500">أو من طرق أخرى</span>
+                    <div class="flex-grow border-t border-slate-700/80"></div>
+                </div>
+
+                <!-- File Upload -->
+                <div>
+                    <label for="fileUploadInput" class="flex flex-col items-center justify-center w-full h-20 border-2 border-dashed border-slate-700 rounded-xl cursor-pointer bg-slate-900/50 hover:bg-slate-900 hover:border-brand-500/50 transition">
+                        <div class="flex flex-row items-center justify-center gap-2">
+                            <i class="fa-solid fa-cloud-arrow-up text-brand-400 text-lg"></i>
+                            <p class="text-xs text-slate-300 font-medium">رفع فيديو من جهازك مباشرة</p>
+                        </div>
+                        <input id="fileUploadInput" type="file" accept="video/*" class="hidden" />
+                    </label>
+                </div>
+            </div>
+
+            <!-- Built-in Preset Videos Library -->
+            <div class="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-5 space-y-4">
+                <h3 class="font-bold text-sm text-slate-200 flex items-center gap-2">
+                    <i class="fa-solid fa-photo-film text-brand-400"></i>
+                    مكتبة الفيديوهات المتاحة
+                </h3>
+
+                <div class="space-y-3">
+                    
+                    <!-- Video Card 1 -->
+                    <div data-url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" data-title="Big Buck Bunny (1080p)" class="preset-card flex items-center gap-3 p-2.5 rounded-xl bg-slate-900/60 border border-slate-700/50 hover:border-brand-500/80 hover:bg-slate-800/80 cursor-pointer transition group border-brand-500">
+                        <div class="w-20 h-12 bg-slate-800 rounded-lg overflow-hidden relative flex-shrink-0">
+                            <img src="https://images.unsplash.com/photo-1534447677768-be436bb09401?w=300&q=80" alt="Bunny" class="w-full h-full object-cover">
+                            <span class="absolute bottom-1 right-1 bg-black/80 text-[9px] px-1 rounded text-slate-300">1080p</span>
+                        </div>
+                        <div class="overflow-hidden">
+                            <h4 class="text-xs font-bold text-slate-200 truncate group-hover:text-brand-400 transition">Big Buck Bunny</h4>
+                            <p class="text-[11px] text-slate-400 mt-0.5">فيلم رسوم متحركة مفتوح</p>
+                        </div>
+                    </div>
+
+                    <!-- Video Card 2 -->
+                    <div data-url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4" data-title="Elephant Dream (1080p)" class="preset-card flex items-center gap-3 p-2.5 rounded-xl bg-slate-900/60 border border-slate-700/50 hover:border-brand-500/80 hover:bg-slate-800/80 cursor-pointer transition group">
+                        <div class="w-20 h-12 bg-slate-800 rounded-lg overflow-hidden relative flex-shrink-0">
+                            <img src="https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=300&q=80" alt="Elephant Dream" class="w-full h-full object-cover">
+                            <span class="absolute bottom-1 right-1 bg-black/80 text-[9px] px-1 rounded text-slate-300">1080p</span>
+                        </div>
+                        <div class="overflow-hidden">
+                            <h4 class="text-xs font-bold text-slate-200 truncate group-hover:text-brand-400 transition">Elephant's Dream</h4>
+                            <p class="text-[11px] text-slate-400 mt-0.5">مشروع سينمائي ثلاثي الأبعاد</p>
+                        </div>
+                    </div>
+
+                    <!-- Video Card 3 -->
+                    <div data-url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4" data-title="Tears of Steel (1080p)" class="preset-card flex items-center gap-3 p-2.5 rounded-xl bg-slate-900/60 border border-slate-700/50 hover:border-brand-500/80 hover:bg-slate-800/80 cursor-pointer transition group">
+                        <div class="w-20 h-12 bg-slate-800 rounded-lg overflow-hidden relative flex-shrink-0">
+                            <img src="https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=300&q=80" alt="Tears of Steel" class="w-full h-full object-cover">
+                            <span class="absolute bottom-1 right-1 bg-black/80 text-[9px] px-1 rounded text-slate-300">1080p</span>
+                        </div>
+                        <div class="overflow-hidden">
+                            <h4 class="text-xs font-bold text-slate-200 truncate group-hover:text-brand-400 transition">Tears of Steel</h4>
+                            <p class="text-[11px] text-slate-400 mt-0.5">فيلم خيال علمي ودقة عالية</p>
+                        </div>
+                    </div>
+
+                    <!-- Video Card 4 -->
+                    <div data-url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" data-title="Chromecast Tech Sample" class="preset-card flex items-center gap-3 p-2.5 rounded-xl bg-slate-900/60 border border-slate-700/50 hover:border-brand-500/80 hover:bg-slate-800/80 cursor-pointer transition group">
+                        <div class="w-20 h-12 bg-slate-800 rounded-lg overflow-hidden relative flex-shrink-0">
+                            <img src="https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=300&q=80" alt="Blazes" class="w-full h-full object-cover">
+                            <span class="absolute bottom-1 right-1 bg-black/80 text-[9px] px-1 rounded text-slate-300">720p</span>
+                        </div>
+                        <div class="overflow-hidden">
+                            <h4 class="text-xs font-bold text-slate-200 truncate group-hover:text-brand-400 transition">For Bigger Blazes</h4>
+                            <p class="text-[11px] text-slate-400 mt-0.5">مقاطع طبيعية وإعلانية</p>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- How it works box -->
+            <div class="bg-indigo-950/40 border border-indigo-800/40 rounded-2xl p-4 text-xs text-indigo-200 leading-relaxed">
+                <div class="font-bold mb-1.5 text-indigo-300 flex items-center gap-1.5">
+                    <i class="fa-solid fa-circle-info"></i>
+                    كيف تعمل تقنية تحويل الجودة؟
+                </div>
+                يقوم المشغل باستقبال مصدر الفيديو بجودته الأصلية، ثم يستعمل نظام Canvas 2D الذكي لإعادة حساب مصفوفة أبعاد الفيديو وتقليل أبعاده فوراً إلى (240p أو 360p أو 480p أو 720p). هذا يتيح لك تجربة تغيير الجودات بمرونة كاملة وبدون الحاجة لربط خادم خارجي لإعادة التشفير.
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800 bg-slate-900 py-6 text-center text-xs text-slate-500">
+        <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <p>© 2026 OmniStream Player. جميع الحقوق محفوظة.</p>
+            <p class="text-slate-400">تطبيق مشغل الفيديو عالي الأداء مع محاكي تقليل الجودات باللغة العربية.</p>
+        </div>
+    </footer>
+
+    <!-- Notification Toast Element -->
+    <div id="toast" class="fixed bottom-6 left-6 z-50 bg-slate-800 border border-slate-700 text-slate-200 text-xs px-4 py-3 rounded-xl shadow-2xl opacity-0 transition-all pointer-events-none flex items-center gap-2">
+        <i class="fa-solid fa-circle-check text-emerald-400 text-sm"></i>
+        <span id="toastMsg">تم تغيير الجودة بنجاح</span>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Elements Reference
+            const mainVideo = document.getElementById('mainVideo');
+            const canvas = document.getElementById('videoCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            const playerContainer = document.getElementById('playerContainer');
+            const playPauseBtn = document.getElementById('playPauseBtn');
+            const playIcon = document.getElementById('playIcon');
+            const centerPlayBtn = document.getElementById('centerPlayBtn');
+            const centerPlayIcon = document.getElementById('centerPlayIcon');
+            
+            const progressBar = document.getElementById('progressBar');
+            const currentTimeEl = document.getElementById('currentTime');
+            const durationTimeEl = document.getElementById('durationTime');
+            
+            const muteBtn = document.getElementById('muteBtn');
+            const volumeIcon = document.getElementById('volumeIcon');
+            const volumeBar = document.getElementById('volumeBar');
+            
+            const qualityMenuBtn = document.getElementById('qualityMenuBtn');
+            const qualityDropdown = document.getElementById('qualityDropdown');
+            const selectedQualityLabel = document.getElementById('selectedQualityLabel');
+            const canvasResBadge = document.getElementById('canvasResBadge');
+            
+            const speedMenuBtn = document.getElementById('speedMenuBtn');
+            const speedDropdown = document.getElementById('speedDropdown');
+            const speedLabel = document.getElementById('speedLabel');
+            
+            const fullscreenBtn = document.getElementById('fullscreenBtn');
+            const videoTitleEl = document.getElementById('videoTitle');
+            const loadingSpinner = document.getElementById('loadingSpinner');
+            
+            const metricRes = document.getElementById('metricRes');
+            const metricFps = document.getElementById('metricFps');
+            const metricBitrate = document.getElementById('metricBitrate');
+            const metricStatus = document.getElementById('metricStatus');
+            
+            const imageSmoothingSelect = document.getElementById('imageSmoothingSelect');
+            const compressionBlurRange = document.getElementById('compressionBlurRange');
+            const blurVal = document.getElementById('blurVal');
+            
+            const videoUrlInput = document.getElementById('videoUrlInput');
+            const loadUrlBtn = document.getElementById('loadUrlBtn');
+            const clearUrlBtn = document.getElementById('clearUrlBtn');
+            const fileUploadInput = document.getElementById('fileUploadInput');
+            const presetCards = document.querySelectorAll('.preset-card');
+            const sampleUrlBtns = document.querySelectorAll('.sample-url-btn');
+
+            // State Variables
+            let isPlaying = false;
+            let currentQuality = 1080; // Default resolution height
+            let animationFrameId = null;
+            let lastFrameTime = performance.now();
+            let frameCount = 0;
+            let currentFps = 60;
+            let blurAmount = 0;
+
+            // Resolution manager function to resize internal canvas buffer
+            function setCanvasResolution(targetHeight) {
+                currentQuality = parseInt(targetHeight);
+                
+                // Calculate width maintaining video aspect ratio (default 16:9)
+                const aspect = (mainVideo.videoWidth && mainVideo.videoHeight) 
+                    ? (mainVideo.videoWidth / mainVideo.videoHeight) 
+                    : (16 / 9);
+                    
+                const width = Math.round(currentQuality * aspect);
+                const height = currentQuality;
+                
+                canvas.width = width;
+                canvas.height = height;
+                
+                // Update UI Labels and Stats
+                const qualityMap = {
+                    1080: '1080p (FHD)',
+                    720: '720p (HD)',
+                    480: '480p (SD)',
+                    360: '360p (منخفضة)',
+                    240: '240p (ضعيفة)'
+                };
+                
+                if (selectedQualityLabel) selectedQualityLabel.textContent = qualityMap[currentQuality] || `${currentQuality}p`;
+                if (canvasResBadge) canvasResBadge.textContent = `${currentQuality}p`;
+                if (metricRes) metricRes.textContent = `${width} x ${height}`;
+                
+                const origHeight = mainVideo.videoHeight || 1080;
+                const scalePercent = Math.round((currentQuality / origHeight) * 100);
+                if (metricBitrate) metricBitrate.textContent = `${scalePercent}% (${currentQuality >= origHeight ? 'أصلي' : 'محاكاة مصفوفة'})`;
+                
+                showToast(`تم تغيير دقة الـ Canvas إلى ${currentQuality}p (${width}x${height})`);
+            }
+
+            // Canvas Render Loop
+            function renderLoop(timestamp) {
+                // FPS calculation
+                frameCount++;
+                if (timestamp - lastFrameTime >= 1000) {
+                    currentFps = frameCount;
+                    frameCount = 0;
+                    lastFrameTime = timestamp;
+                    if (metricFps) metricFps.textContent = `${currentFps} FPS`;
+                }
+
+                if (mainVideo.readyState >= 2 && !mainVideo.paused && !mainVideo.ended) {
+                    ctx.imageSmoothingEnabled = imageSmoothingSelect.value === 'true';
+                    
+                    if (blurAmount > 0) {
+                        ctx.filter = `blur(${blurAmount}px)`;
+                    } else {
+                        ctx.filter = 'none';
+                    }
+
+                    // Render video frame onto downscaled canvas grid
+                    ctx.drawImage(mainVideo, 0, 0, canvas.width, canvas.height);
+                }
+
+                animationFrameId = requestAnimationFrame(renderLoop);
+            }
+
+            // Toggle Play/Pause
+            function togglePlay() {
+                if (mainVideo.paused || mainVideo.ended) {
+                    mainVideo.play().then(() => {
+                        isPlaying = true;
+                        updatePlayStateUI(true);
+                    }).catch(err => {
+                        showToast('عذراً، فشل تشغيل الفيديو');
+                    });
+                } else {
+                    mainVideo.pause();
+                    isPlaying = false;
+                    updatePlayStateUI(false);
+                }
+            }
+
+            function updatePlayStateUI(playing) {
+                if (playing) {
+                    playIcon.className = 'fa-solid fa-pause';
+                    centerPlayIcon.className = 'fa-solid fa-pause';
+                    playerContainer.classList.remove('paused');
+                    metricStatus.textContent = `جاري العرض بوضوح ${currentQuality}p`;
+                    metricStatus.className = 'text-sm font-bold text-emerald-400';
+                } else {
+                    playIcon.className = 'fa-solid fa-play';
+                    centerPlayIcon.className = 'fa-solid fa-play';
+                    playerContainer.classList.add('paused');
+                    metricStatus.textContent = 'متوقف مؤقتاً';
+                    metricStatus.className = 'text-sm font-bold text-amber-400';
+                }
+            }
+
+            // Event Listeners for Play / Pause
+            playPauseBtn.addEventListener('click', togglePlay);
+            centerPlayBtn.addEventListener('click', togglePlay);
+            canvas.addEventListener('click', togglePlay);
+
+            // Progress / Time Scrubbing
+            mainVideo.addEventListener('loadedmetadata', () => {
+                loadingSpinner.classList.add('hidden');
+                durationTimeEl.textContent = formatTime(mainVideo.duration);
+                setCanvasResolution(currentQuality);
+            });
+
+            mainVideo.addEventListener('timeupdate', () => {
+                if (!mainVideo.duration) return;
+                const pct = (mainVideo.currentTime / mainVideo.duration) * 100;
+                progressBar.value = pct;
+                currentTimeEl.textContent = formatTime(mainVideo.currentTime);
+            });
+
+            progressBar.addEventListener('input', (e) => {
+                if (!mainVideo.duration) return;
+                const targetTime = (e.target.value / 100) * mainVideo.duration;
+                mainVideo.currentTime = targetTime;
+            });
+
+            // Volume & Mute Controls
+            volumeBar.addEventListener('input', (e) => {
+                mainVideo.volume = e.target.value;
+                mainVideo.muted = e.target.value == 0;
+                updateVolumeIcon();
+            });
+
+            muteBtn.addEventListener('click', () => {
+                mainVideo.muted = !mainVideo.muted;
+                if (mainVideo.muted) {
+                    volumeBar.value = 0;
+                } else {
+                    volumeBar.value = mainVideo.volume || 1;
+                }
+                updateVolumeIcon();
+            });
+
+            function updateVolumeIcon() {
+                if (mainVideo.muted || mainVideo.volume == 0) {
+                    volumeIcon.className = 'fa-solid fa-volume-xmark text-red-400';
+                } else if (mainVideo.volume < 0.5) {
+                    volumeIcon.className = 'fa-solid fa-volume-low';
+                } else {
+                    volumeIcon.className = 'fa-solid fa-volume-high';
+                }
+            }
+
+            // Quality Dropdown Menu
+            qualityMenuBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                qualityDropdown.classList.toggle('hidden');
+                speedDropdown.classList.add('hidden');
+            });
+
+            document.querySelectorAll('.quality-opt').forEach(opt => {
+                opt.addEventListener('click', () => {
+                    const res = opt.getAttribute('data-res');
+                    setCanvasResolution(res);
+                    qualityDropdown.classList.add('hidden');
+                });
+            });
+
+            // Speed Dropdown Menu
+            speedMenuBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                speedDropdown.classList.toggle('hidden');
+                qualityDropdown.classList.add('hidden');
+            });
+
+            document.querySelectorAll('.speed-opt').forEach(opt => {
+                opt.addEventListener('click', () => {
+                    const speed = parseFloat(opt.getAttribute('data-speed'));
+                    mainVideo.playbackRate = speed;
+                    speedLabel.textContent = `${speed}x`;
+                    speedDropdown.classList.add('hidden');
+                    showToast(`تم تغيير السرعة إلى ${speed}x`);
+                });
+            });
+
+            document.addEventListener('click', () => {
+                qualityDropdown.classList.add('hidden');
+                speedDropdown.classList.add('hidden');
+            });
+
+            // Fullscreen Toggle
+            fullscreenBtn.addEventListener('click', () => {
+                if (!document.fullscreenElement) {
+                    playerContainer.requestFullscreen().catch(err => {
+                        showToast('شاشة كاملة غير مدعومة');
+                    });
+                } else {
+                    document.exitFullscreen();
+                }
+            });
+
+            // Image Smoothing & Compression Blur Simulation
+            imageSmoothingSelect.addEventListener('change', () => {
+                showToast(`وضع التنعيم: ${imageSmoothingSelect.value === 'true' ? 'مفعّل' : 'معطّل'}`);
+            });
+
+            compressionBlurRange.addEventListener('input', (e) => {
+                blurAmount = parseFloat(e.target.value);
+                blurVal.textContent = `${blurAmount}px`;
+            });
+
+            // Load Custom Video URL Function
+            function loadVideoSource(url, title = 'فيديو من رابط خارجي') {
+                if (!url) {
+                    showToast('يرجى إدخال رابط فيديو صحيح أولاً');
+                    return;
+                }
+
+                try {
+                    new URL(url);
+                } catch (e) {
+                    showToast('تنبيه: الرابط المدخل غير صالح!');
+                    return;
+                }
+
+                loadingSpinner.classList.remove('hidden');
+                mainVideo.pause();
+                isPlaying = false;
+                updatePlayStateUI(false);
+
+                mainVideo.onerror = function() {
+                    loadingSpinner.classList.add('hidden');
+                    showToast('فشل تحميل الفيديو! تأكد من صحة الرابط أو سياسة المورد (CORS)');
+                    metricStatus.textContent = 'خطأ في التحميل';
+                    metricStatus.className = 'text-sm font-bold text-red-400';
+                };
+
+                mainVideo.src = url;
+                mainVideo.load();
+                videoTitleEl.textContent = title;
+            }
+
+            loadUrlBtn.addEventListener('click', () => {
+                const url = videoUrlInput.value.trim();
+                loadVideoSource(url, 'فيديو من رابط URL');
+            });
+
+            clearUrlBtn.addEventListener('click', () => {
+                videoUrlInput.value = '';
+            });
+
+            sampleUrlBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const sampleUrl = btn.getAttribute('data-sample');
+                    const sampleName = btn.getAttribute('data-name');
+                    videoUrlInput.value = sampleUrl;
+                    loadVideoSource(sampleUrl, sampleName);
+                });
+            });
+
+            fileUploadInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const fileUrl = URL.createObjectURL(file);
+                    loadVideoSource(fileUrl, file.name);
+                    showToast(`تم تحميل الملف: ${file.name}`);
+                }
+            });
+
+            presetCards.forEach(card => {
+                card.addEventListener('click', () => {
+                    presetCards.forEach(c => c.classList.remove('border-brand-500'));
+                    card.classList.add('border-brand-500');
+
+                    const url = card.getAttribute('data-url');
+                    const title = card.getAttribute('data-title');
+                    videoUrlInput.value = url;
+                    loadVideoSource(url, title);
+                });
+            });
+
+            function formatTime(seconds) {
+                if (isNaN(seconds)) return '00:00';
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
+            }
+
+            function showToast(message) {
+                const toast = document.getElementById('toast');
+                const toastMsg = document.getElementById('toastMsg');
+                toastMsg.textContent = message;
+                toast.classList.remove('opacity-0', 'pointer-events-none');
+                
+                setTimeout(() => {
+                    toast.classList.add('opacity-0', 'pointer-events-none');
+                }, 2500);
+            }
+
+            // Keyboard Shortcuts
+            document.addEventListener('keydown', (e) => {
+                if (e.target.tagName === 'INPUT') return;
+                
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    togglePlay();
+                } else if (e.code === 'ArrowRight') {
+                    mainVideo.currentTime = Math.min(mainVideo.duration, mainVideo.currentTime + 5);
+                } else if (e.code === 'ArrowLeft') {
+                    mainVideo.currentTime = Math.max(0, mainVideo.currentTime - 5);
+                } else if (e.code === 'KeyF') {
+                    fullscreenBtn.click();
+                } else if (e.code === 'KeyM') {
+                    muteBtn.click();
+                }
+            });
+
+            // Initialize Player State & Start Animation Loop
+            setCanvasResolution(1080);
+            updatePlayStateUI(false);
+            animationFrameId = requestAnimationFrame(renderLoop);
+        });
+    </script>
+</body>
+</html>
